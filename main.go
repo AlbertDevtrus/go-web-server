@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"net"
-	"strings"
 )
 
 func main() {
@@ -27,16 +26,28 @@ func main() {
 	}
 }
 
+//  Add backpressure
+
 func handleConection(conn net.Conn) {
-	fmt.Println("Remote Address")
-	fmt.Println(conn.RemoteAddr())
-
-	tcpConn := conn.(*net.TCPConn)
-
 	defer conn.Close()
 
-	buffer := make([]byte, 1024)
+	fmt.Println("Remote address")
+	fmt.Println(conn.RemoteAddr())
 
+	data := make(chan []byte, 10)
+
+	defer close(data)
+
+	go func() {
+		for msg := range data {
+			if _, err := conn.Write(msg); err != nil {
+				fmt.Println("Writing error:", err)
+				return
+			}
+		}
+	}()
+
+	buffer := make([]byte, 1024)
 	for {
 		n, err := conn.Read(buffer)
 
@@ -45,16 +56,50 @@ func handleConection(conn net.Conn) {
 			return
 		}
 
-		data := string(buffer[:n])
+		response := buffer[:n]
 
-		fmt.Println("Data")
-		fmt.Println(data)
-
-		if strings.Contains(data, "q") {
-			fmt.Println("Closing conection")
-			conn.Close()
-			return
+		if string(response) == "Hola\n" {
+			select {
+			case data <- []byte("Adios\n"):
+			default:
+				fmt.Println("Clossing conection")
+				return
+			}
 		}
+
 	}
 
 }
+
+// Basic handle conection
+// func handleConection(conn net.Conn) {
+// 	fmt.Println("Remote Address")
+// 	fmt.Println(conn.RemoteAddr())
+
+// 	defer conn.Close()
+
+// 	buffer := make([]byte, 1024)
+
+// 	for {
+// 		n, err := conn.Read(buffer)
+
+// 		if err != nil {
+// 			print(err)
+// 			return
+// 		}
+
+// 		data := string(buffer[:n])
+
+// 		fmt.Println("Data")
+// 		fmt.Println(data)
+
+// 		conn.Write(buffer)
+
+// 		if strings.Contains(data, "q") {
+// 			fmt.Println("Closing conection")
+// 			conn.Close()
+// 			return
+// 		}
+// 	}
+
+// }
