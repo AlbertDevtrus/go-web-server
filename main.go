@@ -45,6 +45,8 @@ func handleConection(conn net.Conn) {
 				return
 			}
 		}
+
+		conn.Close()
 	}()
 
 	buffer := make([]byte, 1024)
@@ -58,9 +60,18 @@ func handleConection(conn net.Conn) {
 
 		response := buffer[:n]
 
-		if string(response) == "Hola\n" {
+		if string(response) == "quit\n" {
 			select {
-			case data <- []byte("Adios\n"):
+			case data <- []byte("bye\n"):
+				close(data)
+				return
+			default:
+				fmt.Println("Clossing conection")
+				return
+			}
+		} else {
+			select {
+			case data <- []byte(response):
 			default:
 				fmt.Println("Clossing conection")
 				return
@@ -71,35 +82,4 @@ func handleConection(conn net.Conn) {
 
 }
 
-// Basic handle conection
-// func handleConection(conn net.Conn) {
-// 	fmt.Println("Remote Address")
-// 	fmt.Println(conn.RemoteAddr())
-
-// 	defer conn.Close()
-
-// 	buffer := make([]byte, 1024)
-
-// 	for {
-// 		n, err := conn.Read(buffer)
-
-// 		if err != nil {
-// 			print(err)
-// 			return
-// 		}
-
-// 		data := string(buffer[:n])
-
-// 		fmt.Println("Data")
-// 		fmt.Println(data)
-
-// 		conn.Write(buffer)
-
-// 		if strings.Contains(data, "q") {
-// 			fmt.Println("Closing conection")
-// 			conn.Close()
-// 			return
-// 		}
-// 	}
-
-// }
+// Dinamic Buffer
