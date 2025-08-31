@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"net"
 )
@@ -11,6 +12,8 @@ func main() {
 	if err != nil {
 		print(err)
 	}
+
+	defer ln.Close()
 
 	fmt.Println("Server Running on: ")
 	fmt.Println(ln.Addr())
@@ -29,14 +32,10 @@ func main() {
 //  Add backpressure
 
 func handleConection(conn net.Conn) {
-	defer conn.Close()
-
 	fmt.Println("Remote address")
 	fmt.Println(conn.RemoteAddr())
 
 	data := make(chan []byte, 10)
-
-	defer close(data)
 
 	go func() {
 		for msg := range data {
@@ -46,40 +45,56 @@ func handleConection(conn net.Conn) {
 			}
 		}
 
-		conn.Close()
 	}()
 
-	buffer := make([]byte, 1024)
+	var message []byte
+	tmp := make([]byte, 1024)
+
 	for {
-		n, err := conn.Read(buffer)
+		defer conn.Close()
+		n, err := conn.Read(tmp)
 
 		if err != nil {
-			print(err)
+			fmt.Println("Reading error:", err)
 			return
 		}
 
-		response := buffer[:n]
+		message = append(message, tmp[:n]...)
 
-		if string(response) == "quit\n" {
-			select {
-			case data <- []byte("bye\n"):
-				close(data)
-				return
-			default:
-				fmt.Println("Clossing conection")
-				return
+		for {
+			var msg []byte
+			msg, message = cutMessage(message)
+
+			if msg == nil {
+				break
 			}
-		} else {
-			select {
-			case data <- []byte(response):
-			default:
-				fmt.Println("Clossing conection")
+
+			var response []byte
+
+			if bytes.Contains(msg, []byte("quit\n")) {
+				data <- []byte("bye\n")
 				return
+			} else {
+				response = []byte("Echo: " + string(msg))
 			}
+
+			data <- []byte(response)
 		}
-
 	}
 
 }
 
-// Dinamic Buffer
+func cutMessage(buf []byte) ([]byte, []byte) {
+	indx := bytes.IndexByte(buf, '\n')
+
+	if indx < 0 {
+		return nil, buf
+	}
+
+	msg := make([]byte, indx+1)
+	copy(msg, buf[:indx+1])
+
+	buf = buf[indx+1:]
+
+	return msg, buf
+}
