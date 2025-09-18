@@ -27,6 +27,11 @@ type BodyReader struct {
 	read   func(p []byte) (n int, err error)
 }
 
+type HTTPError struct {
+	Code    int
+	Message string
+}
+
 var (
 	ErrHeaderTooLarge   = errors.New("http: header too large")
 	ErrIncompleteHeader = errors.New("http: incomplete header")
@@ -194,7 +199,21 @@ func readerFromReq(conn net.TCPConn, buf []byte, req HTTPReq) (BodyReader, error
 		return BodyReader{}, fmt.Errorf("HTTP body not allowed")
 	}
 
-	return BodyReader{}, nil
+	if !bodyAllowed {
+		bodyLen = 0
+	}
+
+	if bodyLen >= 0 {
+		return readerFromConnLength(conn, buf, bodyLen), nil
+	} else if isChunked {
+		return BodyReader{}, fmt.Errorf("HTTP Not supported")
+	} else {
+		return BodyReader{}, fmt.Errorf("HTTP Not supported")
+	}
+}
+
+func readerFromConnLength() {
+
 }
 
 func splitLines(data []byte) [][]byte {
