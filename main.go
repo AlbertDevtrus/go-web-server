@@ -212,8 +212,48 @@ func readerFromReq(conn net.TCPConn, buf []byte, req HTTPReq) (BodyReader, error
 	}
 }
 
-func readerFromConnLength() {
+func readerFromConnLength(conn net.TCPConn, buf []byte, remain int) BodyReader {
+	availableData := make([]byte, len(buf))
+	copy(availableData, buf)
 
+	return BodyReader{
+		length: remain,
+		read: func(p []byte) (int, error) {
+			if remain == 0 {
+				return 0, io.EOF
+			}
+
+			if len(availableData) == 0 {
+				tempBuf := make([]byte, 4096)
+				bytesRead, err := conn.Read(tempBuf)
+
+				if err != nil {
+					return 0, err
+				}
+				if bytesRead == 0 {
+					return 0, fmt.Errorf("unexpected EOF from HTTP body")
+				}
+
+				availableData = tempBuf[:bytesRead]
+			}
+
+			toCopy := len(p)
+			if len(availableData) < toCopy {
+				toCopy = len(availableData)
+			}
+
+			if remain < toCopy {
+				toCopy = remain
+			}
+
+			copy(p[:toCopy], availableData[:toCopy])
+
+			availableData = availableData[toCopy:]
+			remain -= toCopy
+
+			return toCopy, nil
+		},
+	}
 }
 
 func splitLines(data []byte) [][]byte {
