@@ -18,7 +18,7 @@ type HTTPReq struct {
 
 type HTTPRes struct {
 	code    int
-	headers []byte
+	headers [][]byte
 	body    BodyReader
 }
 
@@ -63,24 +63,6 @@ func main() {
 //  Add backpressure
 
 func serveClient(conn net.Conn) {
-
-	// data := make(chan []byte, 10)
-
-	// go func() {
-	// 	for msg := range data {
-	// 		if _, err := conn.Write(msg); err != nil {
-	// 			fmt.Println("Writing error:", err)
-	// 			return
-	// 		}
-	// 	}
-	// }()func() {
-	// 	for msg := range data {
-	// 		if _, err := conn.Write(msg); err != nil {
-	// 			fmt.Println("Writing error:", err)
-	// 			return
-	// 		}
-	// 	}
-	// }()
 	defer conn.Close()
 
 	var message []byte
@@ -112,7 +94,13 @@ func serveClient(conn net.Conn) {
 			}
 		}
 
-		// reqBody := readerFromReq(conn, )
+		// reqBody, err := readerFromReq(conn, message, tmp)
+
+		// if err != nil {
+		// 	fmt.Println("Error reading from the request: ", err)
+		// }
+
+		// res := handleReq(message, reqBody)
 
 		// io.Copy(io.Discard, bodyReader)
 	}
@@ -252,6 +240,44 @@ func readerFromConnLength(conn net.TCPConn, buf []byte, remain int) BodyReader {
 			remain -= toCopy
 
 			return toCopy, nil
+		},
+	}
+}
+
+func handleReq(req HTTPReq, body BodyReader) HTTPRes {
+	var resp BodyReader
+
+	switch string(req.uri) {
+	case "/echo":
+		resp = body
+	default:
+		resp = readerFromMemory([]byte("Hello world\n"))
+	}
+
+	headers := [][]byte{
+		[]byte("Server: from_scratch_http_server"),
+	}
+
+	return HTTPRes{
+		code:    200,
+		headers: headers,
+		body:    resp,
+	}
+}
+
+func readerFromMemory(data []byte) BodyReader {
+	done := false
+
+	return BodyReader{
+		length: len(data),
+		read: func(p []byte) (int, error) {
+			if done {
+				return 0, io.EOF
+			} else {
+
+				done = true
+				return len(data), nil
+			}
 		},
 	}
 }
