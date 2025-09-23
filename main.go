@@ -60,8 +60,6 @@ func main() {
 	}
 }
 
-//  Add backpressure
-
 func serveClient(conn net.Conn) {
 	defer conn.Close()
 
@@ -94,15 +92,15 @@ func serveClient(conn net.Conn) {
 			}
 		}
 
-		// reqBody, err := readerFromReq(conn, message, tmp)
+		reqBody, err := readerFromReq(conn, message, tmp)
 
-		// if err != nil {
-		// 	fmt.Println("Error reading from the request: ", err)
-		// }
+		if err != nil {
+			fmt.Println("Error reading from the request: ", err)
+		}
 
-		// res := handleReq(message, reqBody)
+		res := handleReq(message, reqBody)
 
-		// io.Copy(io.Discard, bodyReader)
+		io.Copy(io.Discard, bodyReader)
 	}
 
 }
@@ -280,6 +278,63 @@ func readerFromMemory(data []byte) BodyReader {
 			}
 		},
 	}
+}
+
+func writeResponse(conn net.Conn, resp HTTPRes) error {
+
+	response := string(encodeHTTPResp(resp))
+	response += fmt.Sprintf("Content-Length: %d\r\n\r\n", resp.body.length)
+
+	_, err := conn.Write([]byte(response))
+
+	if err != nil {
+		return fmt.Errorf("error writing headers: %w", err)
+	}
+
+	buffer := make([]byte, 4096)
+	for {
+		n, err := resp.body.read(buffer)
+
+		if n > 0 {
+			_, writeErr := conn.Write(buffer[:n])
+			if writeErr != nil {
+				return fmt.Errorf("error writing body: %w", writeErr)
+			}
+		}
+
+		if err == io.EOF {
+			break
+		}
+
+		if err != nil {
+			return fmt.Errorf("error reading body: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func encodeHTTPResp(resp HTTPRes) []byte {
+	reasonPhrase := getReasonPhrase(resp.code)
+
+	encodedResp := fmt.Sprintf("HTTP/1.1 %d %s\r\n", resp.code, reasonPhrase)
+
+	return []byte(encodedResp)
+}
+
+func getReasonPhrase(code int) string {
+	reasons := map[int]string{
+		200: "OK",
+		201: "Created",
+		400: "Bad Request",
+		404: "Not Found",
+		500: "Internal Server Error",
+	}
+
+	if phrase, exists := reasons[code]; exists {
+		return phrase
+	}
+	return "Unknown"
 }
 
 func splitLines(data []byte) [][]byte {
