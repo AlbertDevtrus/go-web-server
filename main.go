@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"strconv"
+	"sync"
 )
 
 type HTTPReq struct {
@@ -63,13 +64,13 @@ func main() {
 func serveClient(conn net.Conn) {
 	defer conn.Close()
 
-	var message []byte
+	var buffer []byte
 	tmp := make([]byte, 1024)
 
 	for {
 		n, err := conn.Read(tmp)
 
-		if err == io.EOF && len(message) == 0 {
+		if err == io.EOF {
 			return
 		}
 
@@ -78,29 +79,66 @@ func serveClient(conn net.Conn) {
 			return
 		}
 
-		message = append(message, tmp[:n]...)
+		buffer = append(buffer, tmp[:n]...)
 
-		for {
-			msg, err := cutMessage(message)
+		req, err := cutMessage(buffer)
 
-			if err != nil {
-				fmt.Println("Error while parsing the message: ", err)
-			}
-
-			if msg != nil {
-				break
-			}
+		if err == ErrIncompleteHeader {
+			continue
 		}
 
-		reqBody, err := readerFromReq(conn, message, tmp)
+		if err == ErrHeaderTooLarge {
+			errorResp := "HTTP/1.1 413 Request Entity Too Large\r\nContent-Length: 26\r\n\r\nRequest Entity Too Large"
+			conn.Write([]byte(errorResp))
+			return
+		}
 
 		if err != nil {
-			fmt.Println("Error reading from the request: ", err)
+			fmt.Println("Error parsing message:", err)
+			errorResp := "HTTP/1.1 400 Bad Request\r\nContent-Length: 11\r\n\r\nBad Request"
+			conn.Write([]byte(errorResp))
+			return
 		}
 
-		res := handleReq(message, reqBody)
+		if req == nil {
+			continue
+		}
 
-		io.Copy(io.Discard, bodyReader)
+		headerEnd := bytes.Index(buffer, []byte("\r\n\r\n"))
+
+		if headerEnd < 0 {
+			continue
+		}
+
+		bodyStart := headerEnd + 4
+		var bodyBuffer []byte
+
+		if bodyStart < len(buffer) {
+			bodyBuffer = buffer[bodyStart:]
+		}
+
+		reqBody, err := readerFromReq(conn, bodyBuffer, *req)
+		if err != nil {
+			fmt.Println("Error creating body reader:", err)
+			errorResp := "HTTP/1.1 400 Bad Request\r\nContent-Length: 11\r\n\r\nBad Request"
+			conn.Write([]byte(errorResp))
+			return
+		}
+
+		res := handleReq(*req, reqBody)
+
+		var wg sync.WaitGroup
+
+		wg.Go(func() {
+			err := writeResponse(conn, res)
+			if err != nil {
+				fmt.Println("Error writing response:", err)
+			}
+		})
+
+		wg.Wait()
+
+		return
 	}
 
 }
@@ -144,12 +182,13 @@ func parseHTTPReq(data []byte) (*HTTPReq, error) {
 	}
 
 	var headers [][]byte
-	var header []byte
 
 	for i := 0; i < len(lines)-1; i++ {
-		copy(header, lines[i])
-
-		headers = append(headers, header)
+		if len(lines[i]) > 0 {
+			headerCopy := make([]byte, len(lines[i]))
+			copy(headerCopy, lines[i])
+			headers = append(headers, headerCopy)
+		}
 	}
 
 	return &HTTPReq{
@@ -160,20 +199,24 @@ func parseHTTPReq(data []byte) (*HTTPReq, error) {
 	}, nil
 }
 
-func readerFromReq(conn net.TCPConn, buf []byte, req HTTPReq) (BodyReader, error) {
+func readerFromReq(conn net.Conn, buf []byte, req HTTPReq) (BodyReader, error) {
 	bodyLen := -1
 	contentLen := fieldGet(req.headers, []byte("Content-Length"))
+	intContentLen, err := strconv.Atoi(string(contentLen))
 
-	if len(contentLen) > 1 {
+	if err != nil {
+		return BodyReader{}, fmt.Errorf("error parsing content length: %w", err)
+	}
+
+	if intContentLen > 1 {
 		var err error
 		bodyLen, err = strconv.Atoi(string(contentLen))
-
 		if err != nil {
-			return BodyReader{}, fmt.Errorf("Error parsing content length: %w", err)
+			return BodyReader{}, fmt.Errorf("error parsing content length: %w", err)
 		}
 
 		if bodyLen < 0 {
-			return BodyReader{}, fmt.Errorf("Bad content length: %d", bodyLen)
+			return BodyReader{}, fmt.Errorf("bad content length: %d", bodyLen)
 		}
 	}
 
@@ -198,7 +241,7 @@ func readerFromReq(conn net.TCPConn, buf []byte, req HTTPReq) (BodyReader, error
 	}
 }
 
-func readerFromConnLength(conn net.TCPConn, buf []byte, remain int) BodyReader {
+func readerFromConnLength(conn net.Conn, buf []byte, remain int) BodyReader {
 	availableData := make([]byte, len(buf))
 	copy(availableData, buf)
 
