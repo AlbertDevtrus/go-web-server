@@ -183,7 +183,7 @@ func parseHTTPReq(data []byte) (*HTTPReq, error) {
 
 	var headers [][]byte
 
-	for i := 0; i < len(lines)-1; i++ {
+	for i := 1; i < len(lines)-1; i++ {
 		if len(lines[i]) > 0 {
 			headerCopy := make([]byte, len(lines[i]))
 			copy(headerCopy, lines[i])
@@ -202,7 +202,15 @@ func parseHTTPReq(data []byte) (*HTTPReq, error) {
 func readerFromReq(conn net.Conn, buf []byte, req HTTPReq) (BodyReader, error) {
 	bodyLen := -1
 	contentLen := fieldGet(req.headers, []byte("Content-Length"))
-	intContentLen, err := strconv.Atoi(string(contentLen))
+
+	var intContentLen int
+	var err error
+
+	if string(contentLen) == "" {
+		intContentLen = -1
+	} else {
+		intContentLen, err = strconv.Atoi(string(contentLen))
+	}
 
 	if err != nil {
 		return BodyReader{}, fmt.Errorf("error parsing content length: %w", err)
@@ -316,8 +324,8 @@ func readerFromMemory(data []byte) BodyReader {
 				return 0, io.EOF
 			} else {
 
-				done = true
-				return len(data), nil
+				n := copy(p, data)
+				return n, nil
 			}
 		},
 	}
